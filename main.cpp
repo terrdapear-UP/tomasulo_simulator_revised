@@ -28,17 +28,20 @@ using namespace std;
 //#######################################################################
 //**** Define Architecture
 // NUMBER OF RESERVATION STATIONS
-const int Num_ADD_RS = 4;
-const int Num_MULT_RS = 2;
-const int Num_DIV_RS = 3;
+const int Num_LOAD_RS = 3;
+const int Num_ADD_RS = 3;
+const int Num_MULT_RS = 3;
+const int Num_DIV_RS = 0;
 // Opcode Values
 const int AddOp = 0;
 const int SubOp = 1;
 const int MultOp = 2;
 const int DivOp = 3;
+const int LoadOp =4;
 // RESERVATION STATION LATENCY
-const int ADD_Lat = 4;
-const int MULT_Lat = 12;
+const int LOAD_Lat =1;
+const int ADD_Lat = 3;
+const int MULT_Lat = 10;
 const int DIV_Lat = 38;
 // Datapath Latency
 const int ISSUE_Lat = 1;
@@ -53,7 +56,7 @@ int Total_WRITEBACKS = 0;
 int currentInst_ISSUE = 0;
 // Temporary fix for errors due to RS names being numbers
 // -> errors with REG/RS/REGSTATUS == zero
-const int ZERO_REG = 5000;
+const int ZERO_REG = 0;
 const int RegStatusEmpty = 1000;
 const int OperandAvailable = 1001;
 const int OperandInit = 1002;
@@ -88,13 +91,13 @@ int main(){
     // Input program instructions
     Instruction
             //(rd,rs,rt,opcode)
-            I0(1,2,3,AddOp),
-            I1(4,1,5,AddOp),
-            I2(6,7,8,SubOp),
-            I3(9,4,10,MultOp),
-            I4(11,12,6,DivOp),
-            I5(8,1,5,MultOp),
-            I6(7,2,3,MultOp);
+            I0(6,1,ZERO_REG,LoadOp),
+            I1(5,2,ZERO_REG,LoadOp),
+            I2(3,3,ZERO_REG,LoadOp),
+            I3(3,1,2,MultOp),
+            I4(5,4,3,AddOp),
+            I5(6,4,1,AddOp),
+            I6(10,5,6,MultOp);
     // Pack Instructions into vector
     vector<Instruction> Inst = {I0,I1,I2,I3,I4,I5,I6};
 
@@ -107,25 +110,26 @@ int main(){
     ReservationStation
             ADD1(AddOp, OperandInit),
             ADD2(AddOp, OperandInit),
-            ADD3(AddOp, OperandInit),
-            ADD4(AddOp, OperandInit);
+            ADD3(AddOp, OperandInit);
     ReservationStation
             MULT1(MultOp, OperandInit),
-            MULT2(MultOp, OperandInit);
+            MULT2(MultOp, OperandInit),
+            MULT3(MultOp,OperandInit);
     ReservationStation
-            DIV1(DivOp, OperandInit),
-            DIV2(DivOp, OperandInit),
-            DIV3(DivOp, OperandInit);
+            LOAD1(LoadOp, OperandInit),
+            LOAD2(LoadOp, OperandInit),
+            LOAD3(LoadOp, OperandInit);
     // Pack reservation stations into vector
-    vector<ReservationStation> ResStation = {ADD1,
+    vector<ReservationStation> ResStation = {LOAD1,
+                                             LOAD2,
+                                             LOAD3,
+                                             ADD1,
                                              ADD2,
                                              ADD3,
-                                             ADD4,
                                              MULT1,
                                              MULT2,
-                                             DIV1,
-                                             DIV2,
-                                             DIV3};
+                                             MULT3
+                                             };
 
     // TODO: could make this a vector rather than a class object
     // Initialize register status objects
@@ -198,15 +202,36 @@ int ISSUE(vector<Instruction>& INST,
     // determine if there is an open RS of r type. if yes
     // -> r = that open spot.
     // Boundry's of given RS
-    int RSAddStart = Num_ADD_RS-Num_ADD_RS;
-    int RSAddEnd = Num_ADD_RS;
+    int RSLoadStart = 0;
+    int RSLoadEnd= Num_LOAD_RS;
+
+    int RSAddStart = Num_LOAD_RS;
+    int RSAddEnd = Num_LOAD_RS + Num_ADD_RS;
+
+    
+    int RSMulStart = RSAddEnd;
+    int RSMulEnd = RSAddEnd+Num_MULT_RS;
+    
     int RSSubStart = Num_ADD_RS-Num_ADD_RS;
     int RSSubEnd = Num_ADD_RS;
-    int RSMulStart = Num_ADD_RS;
-    int RSMulEnd = Num_ADD_RS+Num_MULT_RS;
     int RSDivStart = Num_ADD_RS+Num_MULT_RS;
     int RSDivEnd = Num_ADD_RS+Num_MULT_RS+Num_DIV_RS;
     switch(r){
+        case LoadOp:
+            for (int i=RSLoadStart;i<RSLoadEnd;i++){
+                if (!RESSTATION[i].busy){
+                    r=i;
+                    currentInst_ISSUE++;
+                    RESSTATION[i].op = LoadOp;
+                    rsFree=true;
+                    break;
+                }
+            }
+            if (!rsFree){
+                return 1;
+            }
+            break;
+
         case AddOp:
             for(int i=RSAddStart;i<RSAddEnd;i++){
                 if(!RESSTATION[i].busy){
@@ -335,6 +360,15 @@ void EXECUTE(vector<Instruction>& INST,
                     //		case(div):	clock += 38;
                     RESSTATION[r].lat++;
                     switch(RESSTATION[r].op){
+                        case (LoadOp):
+                            if (RESSTATION[r].lat==LOAD_Lat){
+                                RESSTATION[r].result=RESSTATION[r].Vj;
+                                RESSTATION[r].resultReady = true;
+                                RESSTATION[r].lat=0;
+                                INST[RESSTATION[r].instNum].executeClockEnd=Clock;
+                                RESSTATION[r].ISSUE_Lat=0;
+                            }
+                            break;
                         case(AddOp):
                             if(RESSTATION[r].lat == ADD_Lat){
                                 RESSTATION[r].result = RESSTATION[r].Vj + RESSTATION[r].Vk;
@@ -346,6 +380,7 @@ void EXECUTE(vector<Instruction>& INST,
                                 // reset ISSUE latency for RS
                                 RESSTATION[r].ISSUE_Lat = 0;
                             }
+                            break;
                         case(SubOp):
                             if(RESSTATION[r].lat == ADD_Lat){
                                 RESSTATION[r].result = RESSTATION[r].Vj - RESSTATION[r].Vk;
@@ -356,6 +391,7 @@ void EXECUTE(vector<Instruction>& INST,
                                 // reset ISSUE latency for RS
                                 RESSTATION[r].ISSUE_Lat = 0;
                             }
+                            break;
                         case(MultOp):
                             if(RESSTATION[r].lat == MULT_Lat){
                                 RESSTATION[r].result = RESSTATION[r].Vj * RESSTATION[r].Vk;
@@ -366,6 +402,7 @@ void EXECUTE(vector<Instruction>& INST,
                                 // reset ISSUE latency for RS
                                 RESSTATION[r].ISSUE_Lat = 0;
                             }
+                            break;
                         case(DivOp):
                             if(RESSTATION[r].lat == DIV_Lat){
                                 RESSTATION[r].result = RESSTATION[r].Vj / RESSTATION[r].Vk;
@@ -376,6 +413,7 @@ void EXECUTE(vector<Instruction>& INST,
                                 // reset ISSUE latency for RS
                                 RESSTATION[r].ISSUE_Lat = 0;
                             }
+                            break;
                         default:
                             break;
                     }
